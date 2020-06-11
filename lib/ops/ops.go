@@ -566,14 +566,21 @@ type Leader interface {
 	StepDown(SiteKey) error
 }
 
-// Status defines operations with site status
+// Status defines operations with cluster status
 type Status interface {
-	// CheckSiteStatus runs app status hook and updates site status appropriately
+	// CheckSiteStatus runs app status hook and updates cluster status appropriately
 	CheckSiteStatus(key SiteKey) error
+	// GetLocalClusterStatus returns the status of the cluster
+	GetLocalClusterStatus(ClusterStatusRequest) (*ClusterStatus, error)
 	// GetClusterNodes returns a real-time information about cluster nodes
 	GetClusterNodes(SiteKey) ([]Node, error)
 	// GetVersion returns the gravity binary version information.
 	GetVersion(context.Context) (*modules.Version, error)
+}
+
+type ClusterStatusRequest struct {
+	// FIXME
+	OperationID string `json:"operation_id,omitempty"`
 }
 
 // Node represents a cluster node information

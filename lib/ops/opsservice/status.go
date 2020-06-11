@@ -18,8 +18,10 @@ package opsservice
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/gravitational/gravity/lib/app"
+	"github.com/gravitational/gravity/lib/defaults"
 	"github.com/gravitational/gravity/lib/ops"
 	"github.com/gravitational/gravity/lib/schema"
 	"github.com/gravitational/gravity/lib/status"
@@ -27,6 +29,7 @@ import (
 
 	"github.com/gravitational/satellite/agent/proto/agentpb"
 	"github.com/gravitational/trace"
+	"github.com/sirupsen/logrus"
 )
 
 // CheckSiteStatus runs application status hook and updates cluster status appropriately
@@ -64,8 +67,8 @@ func (o *Operator) CheckSiteStatus(key ops.SiteKey) error {
 		return trace.Wrap(statusErr)
 	}
 
-	// all status checks passed so if the cluster was previously disabled
-	// because of those checks, enable it back
+	// all status checks passed so if the cluster was previously degraded
+	// because of those checks, reset its status
 	if cluster.canActivate() {
 		err := o.ActivateSite(ops.ActivateSiteRequest{
 			AccountID:  key.AccountID,
@@ -122,4 +125,89 @@ func (s *site) checkStatusHook(ctx context.Context) error {
 		return trace.Wrap(err, "status hook failed: %s", out)
 	}
 	return nil
+}
+
+func (s *site) collectLocalClusterState(ctx context.Context, req ops.ClusterStatusRequest) (*ops.ClusterStatus, error) {
+	cluster, err := s.service.GetLocalSite()
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	status := &ops.ClusterStatus{
+		Domain: cluster.Domain,
+		Reason: cluster.Reason,
+		App:    cluster.App.Package,
+	}
+	token, err := s.service.GetExpandToken(cluster.Key())
+	if err != nil && !trace.IsNotFound(err) {
+		return status, trace.Wrap(err)
+	}
+	if token != nil {
+		status.Token = *token
+	}
+	status.ServerVersion, err = s.service.GetVersion(ctx)
+	if err != nil {
+		logrus.WithError(err).Warn("Failed to query server version information.")
+	}
+	// Collect application endpoints.
+	endpoints, err := s.service.GetApplicationEndpoints(cluster.Key())
+	if err != nil {
+		logrus.WithError(err).Warn("Failed to fetch application endpoints.")
+		status.Endpoints.Applications.Error = err
+	}
+	if len(endpoints) != 0 {
+		// Right now only 1 application is supported, in the future there
+		// will be many applications each with its own endpoints.
+		status.Endpoints.Applications.Endpoints = append(status.Endpoints.Applications.Endpoints,
+			ops.ApplicationEndpoints{
+				Application: cluster.App.Package,
+				Endpoints:   endpoints,
+			})
+	}
+	// For cluster endpoints, they point to gravity-site service on master nodes.
+	masters := cluster.ClusterState.Servers.Masters()
+	for _, master := range masters {
+		status.Endpoints.Cluster.AuthGateway = append(status.Endpoints.Cluster.AuthGateway,
+			fmt.Sprintf("%v:%v", master.AdvertiseIP, defaults.GravitySiteNodePort))
+		status.Endpoints.Cluster.UI = append(status.Endpoints.Cluster.UI,
+			fmt.Sprintf("https://%v:%v", master.AdvertiseIP, defaults.GravitySiteNodePort))
+	}
+	activeOperations, err := ops.GetActiveOperations(cluster.Key(), s.service)
+	if err != nil && !trace.IsNotFound(err) {
+		return status, trace.Wrap(err)
+	}
+	status.ActiveOperation = activeOperations
+
+	// FIXME: do formatting on the client side
+	for _, op := range activeOperations {
+		progress, err := s.service.GetSiteOperationProgress(op.Key())
+		if err != nil {
+			return status, trace.Wrap(err)
+		}
+		status.ActiveOperations = append(status.ActiveOperations,
+			fromOperationAndProgress(op, *progress))
+	}
+	var operation *ops.SiteOperation
+	var progress *ops.ProgressEntry
+	// if operation ID is provided, get info for that operation, otherwise
+	// get info for the most recent operation
+	if req.OperationID != "" {
+		operation, progress, err = ops.GetOperationWithProgress(
+			cluster.OperationKey(req.OperationID), s.service)
+	} else {
+		operation, progress, err = ops.GetLastCompletedOperation(
+			cluster.Key(), s.service)
+	}
+	if err != nil {
+		return status, trace.Wrap(err)
+	}
+	status.Operation = fromOperationAndProgress(*operation, *progress)
+	// FIXME
+
+	// Collect registered Teleport nodes
+	teleportNodes, err := s.service.GetClusterNodes(cluster.Key())
+	if err != nil {
+		return status, trace.Wrap(err, "failed to query teleport nodes")
+	}
+	status.TeleportNodes = teleportNodes
+	return status, nil
 }

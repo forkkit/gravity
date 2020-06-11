@@ -111,12 +111,8 @@ func checkStatus(ctx context.Context, env *localenv.LocalEnvironment, ignoreWarn
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	cluster, err := operator.GetLocalSite()
-	if err != nil {
-		return trace.Wrap(err)
-	}
 
-	status, err := statusapi.FromCluster(ctx, operator, *cluster, "")
+	status, err := statusapi.FromCluster(ctx, operator, "")
 	if err != nil {
 		return trace.Wrap(err)
 	}

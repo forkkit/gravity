@@ -62,7 +62,7 @@ func status(env *localenv.LocalEnvironment, printOptions printOptions) error {
 		err = printStatus(operator, clusterStatus{*status, nil}, printOptions)
 		return trace.Wrap(err)
 	} else {
-		log.Errorf(trace.DebugReport(err))
+		log.WithError(err).Error("Failed to query status.")
 	}
 
 	if printOptions.operationID != "" {
@@ -159,16 +159,10 @@ func statusPeriodic(env *localenv.LocalEnvironment, printOptions printOptions, s
 
 // statusOnce collects cluster status information
 func statusOnce(ctx context.Context, operator ops.Operator, operationID string) (*statusapi.Status, error) {
-	cluster, err := operator.GetLocalSite()
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-
-	status, err := statusapi.FromCluster(ctx, operator, *cluster, operationID)
+	status, err := statusapi.FromCluster(ctx, operator, operationID)
 	if err != nil {
 		return status, trace.Wrap(err)
 	}
-
 	return status, nil
 }
 
@@ -184,13 +178,14 @@ func printStatus(operator ops.Operator, status clusterStatus, printOptions print
 			fmt.Println("there is no operation in progress")
 			return nil
 		}
-		fmt.Printf("%v\n", status.Operation.State)
+		fmt.Println(status.Operation.State)
 		return nil
 
 	case printOptions.token:
 		fmt.Print(status.Token.Token)
 
 	case printOptions.quiet:
+
 	default:
 		return trace.Wrap(printStatusWithOptions(status, printOptions))
 	}
@@ -268,7 +263,7 @@ func printStatusText(cluster clusterStatus) {
 	if cluster.Cluster != nil {
 		fmt.Fprintf(w, "Cluster name:\t%v\n", unknownFallback(cluster.Cluster.Domain))
 		if cluster.Status.IsDegraded() {
-			fmt.Fprintf(w, "Cluster status:\t%v\n", color.RedString("degraded"))
+			fmt.Fprintf(w, "Cluster status:\t%v\n", color.RedString(cluster.State))
 		} else {
 			fmt.Fprintf(w, "Cluster status:\t%v\n", color.GreenString(cluster.State))
 		}

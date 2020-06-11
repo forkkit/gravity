@@ -43,107 +43,42 @@ import (
 
 // FromCluster collects cluster status information.
 // The function returns the partial status if not all details can be collected
-func FromCluster(ctx context.Context, operator ops.Operator, cluster ops.Site, operationID string) (status *Status, err error) {
+func FromCluster(ctx context.Context, operator ops.Operator, operationID string) (status *Status, err error) {
 	status = &Status{
 		Cluster: &Cluster{
-			Domain: cluster.Domain,
 			// Default to degraded - reset on successful query
 			State:         ops.SiteStateDegraded,
-			Reason:        cluster.Reason,
-			App:           cluster.App.Package,
 			ClientVersion: modules.Get().Version(),
 			Extension:     newExtension(),
 		},
 	}
 
-	token, err := operator.GetExpandToken(cluster.Key())
-	if err != nil && !trace.IsNotFound(err) {
-		return status, trace.Wrap(err)
-	}
-	if token != nil {
-		status.Token = *token
-	}
-
-	status.Cluster.ServerVersion, err = operator.GetVersion(ctx)
+	status.Cluster.ClusterState, err = operator.GetClusterState(ctx. ops.ClusterStateRequest{
+		OperationID: operationID,
+	})
 	if err != nil {
-		logrus.WithError(err).Warn("Failed to query server version information.")
-	}
-
-	// Collect application endpoints.
-	endpoints, err := operator.GetApplicationEndpoints(cluster.Key())
-	if err != nil {
-		logrus.WithError(err).Warn("Failed to fetch application endpoints.")
-		status.Endpoints.Applications.Error = err
-	}
-	if len(endpoints) != 0 {
-		// Right now only 1 application is supported, in the future there
-		// will be many applications each with its own endpoints.
-		status.Endpoints.Applications.Endpoints = append(status.Endpoints.Applications.Endpoints,
-			ApplicationEndpoints{
-				Application: cluster.App.Package,
-				Endpoints:   endpoints,
-			})
-	}
-
-	// For cluster endpoints, they point to gravity-site service on master nodes.
-	masters := cluster.ClusterState.Servers.Masters()
-	for _, master := range masters {
-		status.Endpoints.Cluster.AuthGateway = append(status.Endpoints.Cluster.AuthGateway,
-			fmt.Sprintf("%v:%v", master.AdvertiseIP, defaults.GravitySiteNodePort))
-		status.Endpoints.Cluster.UI = append(status.Endpoints.Cluster.UI,
-			fmt.Sprintf("https://%v:%v", master.AdvertiseIP, defaults.GravitySiteNodePort))
+		log.WithError(err).Warn("Failed to query cluster state.")
 	}
 
 	// FIXME: have status extension accept the operator/environment
 	err = status.Cluster.Extension.Collect()
 	if err != nil {
-		return status, trace.Wrap(err)
+		log.WithError(err).Warn("Failed to query extension state.")
 	}
-
-	activeOperations, err := ops.GetActiveOperations(cluster.Key(), operator)
-	if err != nil && !trace.IsNotFound(err) {
-		return status, trace.Wrap(err)
-	}
-	for _, op := range activeOperations {
-		progress, err := operator.GetSiteOperationProgress(op.Key())
-		if err != nil {
-			return status, trace.Wrap(err)
-		}
-		status.ActiveOperations = append(status.ActiveOperations,
-			fromOperationAndProgress(op, *progress))
-	}
-
-	var operation *ops.SiteOperation
-	var progress *ops.ProgressEntry
-	// if operation ID is provided, get info for that operation, otherwise
-	// get info for the most recent operation
-	if operationID != "" {
-		operation, progress, err = ops.GetOperationWithProgress(
-			cluster.OperationKey(operationID), operator)
-	} else {
-		operation, progress, err = ops.GetLastCompletedOperation(
-			cluster.Key(), operator)
-	}
-	if err != nil {
-		return status, trace.Wrap(err)
-	}
-	status.Operation = fromOperationAndProgress(*operation, *progress)
 
 	status.Agent, err = FromPlanetAgent(ctx, cluster.ClusterState.Servers)
 	if err != nil {
-		return status, trace.Wrap(err, "failed to collect system status from agents")
+		log.WithError(err).Warn("Failed to collect system status from agents.")
 	}
 
-	// Collect registered Teleport nodes.
-	teleportNodes, err := operator.GetClusterNodes(cluster.Key())
-	if err != nil {
-		return status, trace.Wrap(err, "failed to query teleport nodes")
-	}
+	
 	for i, server := range status.Agent.Nodes {
 		status.Agent.Nodes[i].TeleportNode = ops.Nodes(teleportNodes).FindByIP(server.AdvertiseIP)
 	}
 
-	status.State = cluster.State
+	if status.IsDegraded() {
+		status.Cluster.ClusteState.State = ops.SiteStateDegraded
+	}
 	return status, nil
 }
 
@@ -202,102 +137,21 @@ type Cluster struct {
 	Reason storage.Reason `json:"reason,omitempty"`
 	// Domain provides the name of the cluster domain
 	Domain string `json:"domain"`
+	// ActiveOperations is a list of operations currently active in the cluster
+	ActiveOperations []*ClusterOperation `json:"active_operations,omitempty"`
+	// Endpoints contains cluster and application endpoints
+	Endpoints Endpoints `json:"endpoints"`
 	// Token specifies the provisioning token used for joining nodes to cluster if any
 	Token storage.ProvisioningToken `json:"token"`
 	// Operation describes a cluster operation.
 	// This can either refer to the last completed or a specific operation
 	Operation *ClusterOperation `json:"operation,omitempty"`
-	// ActiveOperations is a list of operations currently active in the cluster
-	ActiveOperations []*ClusterOperation `json:"active_operations,omitempty"`
-	// Endpoints contains cluster and application endpoints.
-	Endpoints Endpoints `json:"endpoints"`
 	// Extension is a cluster status extension
 	Extension `json:",inline,omitempty"`
-	// ServerVersion is version of the server the operator is talking to.
-	ServerVersion *modules.Version `json:"server_version,omitempty"`
 	// ClientVersion is version of the binary collecting the status.
 	ClientVersion modules.Version `json:"client_version"`
-}
-
-// Endpoints contains information about cluster and application endpoints.
-type Endpoints struct {
-	// Applications contains endpoints for installed applications.
-	Applications ApplicationsEndpoints `json:"applications,omitempty"`
-	// Cluster contains system cluster endpoints.
-	Cluster ClusterEndpoints `json:"cluster"`
-}
-
-// ClusterEndpoints describes cluster system endpoints.
-type ClusterEndpoints struct {
-	// AuthGateway contains addresses that users should specify via --proxy
-	// flag to tsh commands (essentially, address of gravity-site service)
-	AuthGateway []string `json:"auth_gateway"`
-	// UI contains URLs of the cluster control panel.
-	UI []string `json:"ui"`
-}
-
-// WriteTo writes cluster endpoints to the provided writer.
-func (e ClusterEndpoints) WriteTo(w io.Writer) (n int64, err error) {
-	var errors []error
-	errors = append(errors, fprintf(&n, w, "Cluster endpoints:\n"))
-	errors = append(errors, fprintf(&n, w, "    * Authentication gateway:\n"))
-	for _, e := range e.AuthGateway {
-		errors = append(errors, fprintf(&n, w, "        - %v\n", e))
-	}
-	errors = append(errors, fprintf(&n, w, "    * Cluster management URL:\n"))
-	for _, e := range e.UI {
-		errors = append(errors, fprintf(&n, w, "        - %v\n", e))
-	}
-	return n, trace.NewAggregate(errors...)
-}
-
-// ApplicationsEndpoints contains endpoints for multiple applications.
-type ApplicationsEndpoints struct {
-	// Endpoints lists the endpoints of all applications
-	Endpoints []ApplicationEndpoints
-	// Error indicates whether there was an error fetching endpoints
-	Error error `json:"-"`
-}
-
-// ApplicationEndpoints contains endpoints for a single application.
-type ApplicationEndpoints struct {
-	// Application is the application locator.
-	Application loc.Locator `json:"application"`
-	// Endpoints is a list of application endpoints.
-	Endpoints []ops.Endpoint `json:"endpoints"`
-}
-
-// WriteTo writes all application endpoints to the provided writer.
-func (e ApplicationsEndpoints) WriteTo(w io.Writer) (n int64, err error) {
-	if len(e.Endpoints) == 0 {
-		if e.Error != nil {
-			err := fprintf(&n, w, "Application endpoints: <unable to fetch>")
-			return n, trace.Wrap(err)
-		}
-		return 0, nil
-	}
-	var errors []error
-	errors = append(errors, fprintf(&n, w, "Application endpoints:\n"))
-	for _, app := range e.Endpoints {
-		errors = append(errors, fprintf(&n, w, "    * %v:%v:\n",
-			app.Application.Name, app.Application.Version))
-		for _, ep := range app.Endpoints {
-			errors = append(errors, fprintf(&n, w, "        - %v:\n", ep.Name))
-			for _, addr := range ep.Addresses {
-				errors = append(errors, fprintf(&n, w, "            - %v\n", addr))
-			}
-		}
-	}
-	return n, trace.NewAggregate(errors...)
-}
-
-func fprintf(n *int64, w io.Writer, format string, a ...interface{}) error {
-	written, err := fmt.Fprintf(w, format, a...)
-	if err != nil {
-		return trace.ConvertSystemError(err)
-	}
-	*n += int64(written)
-	return nil
+	// ServerVersion is version of the server the operator is talking to
+	ServerVersion *modules.Version `json:"server_version,omitempty"`
 }
 
 // Key returns key structure that identifies this operation
@@ -377,6 +231,60 @@ type ClusterServer struct {
 
 func (r ClusterOperation) isFailed() bool {
 	return r.State == ops.OperationStateFailed
+}
+
+// ClusterEndpoints describes cluster endpoints
+type ClusterEndpoints opsservice.ClusterEndpoints
+
+// WriteTo writes cluster endpoints to the provided writer.
+func (e ClusterEndpoints) WriteTo(w io.Writer) (n int64, err error) {
+	var errors []error
+	errors = append(errors, fprintf(&n, w, "Cluster endpoints:\n"))
+	errors = append(errors, fprintf(&n, w, "    * Authentication gateway:\n"))
+	for _, e := range e.AuthGateway {
+		errors = append(errors, fprintf(&n, w, "        - %v\n", e))
+	}
+	errors = append(errors, fprintf(&n, w, "    * Cluster management URL:\n"))
+	for _, e := range e.UI {
+		errors = append(errors, fprintf(&n, w, "        - %v\n", e))
+	}
+	return n, trace.NewAggregate(errors...)
+}
+
+// ApplicationEndpoints describes cluster application endpoints
+type ApplicationEndpoints opsservice.ApplicationEndpoints
+
+// WriteTo writes all application endpoints to the provided writer.
+func (e ApplicationsEndpoints) WriteTo(w io.Writer) (n int64, err error) {
+	if len(e.Endpoints) == 0 {
+		if e.Error != nil {
+			err := fprintf(&n, w, "Application endpoints: <unable to fetch>")
+			return n, trace.Wrap(err)
+		}
+		return 0, nil
+	}
+	var errors []error
+	errors = append(errors, fprintf(&n, w, "Application endpoints:\n"))
+	for _, app := range e.Endpoints {
+		errors = append(errors, fprintf(&n, w, "    * %v:%v:\n",
+			app.Application.Name, app.Application.Version))
+		for _, ep := range app.Endpoints {
+			errors = append(errors, fprintf(&n, w, "        - %v:\n", ep.Name))
+			for _, addr := range ep.Addresses {
+				errors = append(errors, fprintf(&n, w, "            - %v\n", addr))
+			}
+		}
+	}
+	return n, trace.NewAggregate(errors...)
+}
+
+func fprintf(n *int64, w io.Writer, format string, a ...interface{}) error {
+	written, err := fmt.Fprintf(w, format, a...)
+	if err != nil {
+		return trace.ConvertSystemError(err)
+	}
+	*n += int64(written)
+	return nil
 }
 
 func fromOperationAndProgress(operation ops.SiteOperation, progress ops.ProgressEntry) *ClusterOperation {

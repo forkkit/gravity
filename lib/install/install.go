@@ -504,11 +504,7 @@ func (i *Installer) getClusterStatus() (*status.Status, error) {
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	cluster, err := clusterOperator.GetLocalSite()
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	status, err := status.FromCluster(i.Context, clusterOperator, *cluster, "")
+	status, err := status.FromCluster(i.Context, clusterOperator, "")
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
