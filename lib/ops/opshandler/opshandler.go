@@ -147,6 +147,7 @@ func NewWebHandler(cfg WebHandlerConfig) (*WebHandler, error) {
 
 	// Status API
 	h.GET("/portal/v1/accounts/:account_id/sites/:site_domain/status", h.needsAuth(h.checkSiteStatus))
+	h.POST("/portal/v1/localclusterstatus", h.needsAuth(h.getAndUpdateClusterStatus))
 
 	// TODO(klizhetas) refactor this method
 	h.GET("/portal/v1/sites/domain/:domain", h.needsAuth(h.getSiteByDomain))
@@ -1166,6 +1167,28 @@ func (h *WebHandler) checkSiteStatus(w http.ResponseWriter, r *http.Request, p h
 		return trace.Wrap(err)
 	}
 	roundtrip.ReplyJSON(w, http.StatusOK, statusOK("ok"))
+	return nil
+}
+
+/*  getAndUpdateClusterStatus checks cluster status by invoking app status hook.
+    Updates the cluster state accordingly and returns the status.
+
+    POST /portal/v1/localclusterstatus
+
+    Success response:
+    ops.ClusterStatus
+*/
+func (h *WebHandler) getAndUpdateClusterStatus(w http.ResponseWriter, r *http.Request, p httprouter.Params, context *HandlerContext) error {
+	dec := json.NewDecoder(r.Body)
+	var req ops.ClusterStatusRequest
+	if err := dec.Decode(&req); err != nil {
+		return trace.BadParameter(err.Error())
+	}
+	resp, err := context.Operator.GetAndUpdateLocalClusterStatus(r.Context(), req)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	roundtrip.ReplyJSON(w, http.StatusOK, resp)
 	return nil
 }
 

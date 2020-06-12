@@ -251,13 +251,19 @@ func (r *Router) CompleteFinalInstallStep(req ops.CompleteFinalInstallStepReques
 	return client.CompleteFinalInstallStep(req)
 }
 
-// CheckSiteStatus runs app status hook and updates site status appropriately
+// CheckSiteStatus runs app status hook and updates cluster status appropriately
 func (r *Router) CheckSiteStatus(key ops.SiteKey) error {
 	client, err := r.RemoteClient(key.SiteDomain)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 	return client.CheckSiteStatus(key)
+}
+
+// GetAndUpdateLocalClusterStatus runs app status hook and updates local cluster status accordingly.
+// Returns the status to the caller
+func (r *Router) GetAndUpdateLocalClusterStatus(ctx context.Context, req ops.ClusterStatusRequest) (*ops.ClusterStatus, error) {
+	return r.Local.GetAndUpdateLocalClusterStatus(ctx, req)
 }
 
 func (r *Router) GetSiteInstructions(tokenID string, serverProfile string, params url.Values) (string, error) {

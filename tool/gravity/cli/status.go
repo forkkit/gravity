@@ -33,6 +33,7 @@ import (
 	"github.com/gravitational/gravity/lib/ops"
 	"github.com/gravitational/gravity/lib/schema"
 	statusapi "github.com/gravitational/gravity/lib/status"
+	agentapi "github.com/gravitational/gravity/lib/status/agent"
 
 	"github.com/dustin/go-humanize"
 	"github.com/fatih/color"
@@ -78,7 +79,7 @@ func status(env *localenv.LocalEnvironment, printOptions printOptions) error {
 		}
 	}
 	if status.Agent == nil {
-		status.Agent, err = statusapi.FromPlanetAgent(ctx, nil)
+		status.Agent, err = agentapi.FromPlanetAgent(ctx, nil)
 		if err != nil {
 			log.Warnf("Failed to query status from planet agent: %v.", trace.DebugReport(err))
 		}
@@ -338,11 +339,11 @@ func printOperation(operation *statusapi.ClusterOperation, w io.Writer) {
 	}
 }
 
-func printAgentStatus(status statusapi.Agent, w io.Writer) {
+func printAgentStatus(status agentapi.Agent, w io.Writer) {
 	if len(status.Nodes) == 0 {
 		fmt.Fprintln(w, color.YellowString("Failed to collect system status from nodes"))
 	}
-	var masters, nodes []statusapi.ClusterServer
+	var masters, nodes []agentapi.ClusterServer
 	for _, node := range status.Nodes {
 		if node.Role == string(schema.ServiceRoleMaster) {
 			masters = append(masters, node)
@@ -364,21 +365,21 @@ func printAgentStatus(status statusapi.Agent, w io.Writer) {
 	}
 }
 
-func printNodeStatus(node statusapi.ClusterServer, w io.Writer) {
+func printNodeStatus(node agentapi.ClusterServer, w io.Writer) {
 	description := node.AdvertiseIP
 	if node.Profile != "" {
 		description = fmt.Sprintf("%v, %v", description, node.Profile)
 	}
 	fmt.Fprintf(w, "        * %v (%v)\n", unknownFallback(node.Hostname), description)
 	switch node.Status {
-	case statusapi.NodeOffline:
+	case agentapi.NodeOffline:
 		fmt.Fprintf(w, "            Status:\t%v\n", color.YellowString("offline"))
-	case statusapi.NodeHealthy:
+	case agentapi.NodeHealthy:
 		fmt.Fprintf(w, "            Status:\t%v\n", color.GreenString("healthy"))
 		for _, probe := range node.WarnProbes {
 			fmt.Fprintf(w, "            [%v]\t%v\n", constants.WarnMark, color.New(color.FgYellow).SprintFunc()(probe))
 		}
-	case statusapi.NodeDegraded:
+	case agentapi.NodeDegraded:
 		fmt.Fprintf(w, "            Status:\t%v\n", color.RedString("degraded"))
 		for _, probe := range node.FailedProbes {
 			fmt.Fprintf(w, "            [%v]\t%v\n", constants.FailureMark, color.New(color.FgRed).SprintFunc()(probe))

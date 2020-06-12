@@ -25,7 +25,7 @@ import (
 	"github.com/gravitational/gravity/lib/localenv"
 	"github.com/gravitational/gravity/lib/pack"
 	"github.com/gravitational/gravity/lib/schema"
-	libstatus "github.com/gravitational/gravity/lib/status"
+	agentapi "github.com/gravitational/gravity/lib/status/agent"
 	"github.com/gravitational/gravity/lib/storage"
 	"github.com/gravitational/gravity/lib/utils"
 	agentpb "github.com/gravitational/satellite/agent/proto/agentpb"
@@ -113,7 +113,7 @@ func planetVersion(env *localenv.LocalEnvironment) (*semver.Version, error) {
 //
 // This method is supposed to be called from inside the planet container.
 func getMasterNodes(ctx context.Context, servers []storage.Server) (addrs []string, err error) {
-	status, err := libstatus.FromPlanetAgent(ctx, servers)
+	status, err := agentapi.FromPlanetAgent(ctx, servers)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

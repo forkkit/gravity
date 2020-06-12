@@ -418,10 +418,24 @@ func (c *Client) CompleteFinalInstallStep(req ops.CompleteFinalInstallStepReques
 	return trace.Wrap(err)
 }
 
-// CheckSiteStatus runs app status hook and updates site status appropriately.
+// CheckSiteStatus runs app status hook and updates cluster status appropriately.
 func (c *Client) CheckSiteStatus(key ops.SiteKey) error {
 	_, err := c.Get(c.Endpoint("accounts", key.AccountID, "sites", key.SiteDomain, "status"), url.Values{})
 	return trace.Wrap(err)
+}
+
+// GetAndUpdateLocalClusterStatus queries and returns the cluster status.
+// If the cluster status has degraded, it is reflected in the cluster record
+func (c *Client) GetAndUpdateLocalClusterStatus(ctx context.Context, req ops.ClusterStatusRequest) (*ops.ClusterStatus, error) {
+	out, err := c.PostJSON(c.Endpoint("localclusterstatus"), url.Values{})
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	var status ops.ClusterStatus
+	if err := json.Unmarshal(out.Bytes(), &status); err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return &status, nil
 }
 
 func (c *Client) GetSiteOperations(siteKey ops.SiteKey) (ops.SiteOperations, error) {

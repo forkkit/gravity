@@ -29,7 +29,7 @@ import (
 	"github.com/gravitational/gravity/lib/defaults"
 	"github.com/gravitational/gravity/lib/fsm"
 	"github.com/gravitational/gravity/lib/ops"
-	"github.com/gravitational/gravity/lib/status"
+	"github.com/gravitational/gravity/lib/status/agent"
 	"github.com/gravitational/gravity/lib/utils"
 	"github.com/gravitational/satellite/agent/proto/agentpb"
 
@@ -167,7 +167,7 @@ func (p *healthExecutor) Execute(ctx context.Context) error {
 	p.Info("Waiting for the planet to start.")
 	err := utils.Retry(defaults.RetryInterval, defaults.RetryAttempts,
 		func() error {
-			status, err := status.FromPlanetAgent(ctx, nil)
+			status, err := agent.FromPlanetAgent(ctx, nil)
 			if err != nil {
 				return trace.Wrap(err)
 			}

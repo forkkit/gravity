@@ -26,7 +26,7 @@ import (
 	"github.com/gravitational/gravity/lib/httplib"
 	kubeutils "github.com/gravitational/gravity/lib/kubernetes"
 	"github.com/gravitational/gravity/lib/ops"
-	"github.com/gravitational/gravity/lib/status"
+	"github.com/gravitational/gravity/lib/status/agent"
 	"github.com/gravitational/gravity/lib/utils"
 
 	"github.com/gravitational/trace"
@@ -63,13 +63,13 @@ func (p *waitPlanetExecutor) Execute(ctx context.Context) error {
 	p.Info("Waiting for the planet to start.")
 	err := utils.Retry(defaults.RetryInterval, defaults.RetryAttempts,
 		func() error {
-			planetStatus, err := status.FromPlanetAgent(ctx, nil)
+			planetStatus, err := agent.FromPlanetAgent(ctx, nil)
 			if err != nil {
 				return trace.Wrap(err)
 			}
 			for _, nodeStatus := range planetStatus.Nodes {
 				if p.Phase.Data.Server.AdvertiseIP == nodeStatus.AdvertiseIP {
-					if nodeStatus.Status == status.NodeHealthy {
+					if nodeStatus.Status == agent.NodeHealthy {
 						return nil
 					}
 				}

@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/gravitational/gravity/lib/defaults"
+	"github.com/gravitational/gravity/lib/status/agent"
 	"github.com/gravitational/gravity/lib/utils"
 
 	"github.com/gravitational/satellite/agent/proto/agentpb"
@@ -36,7 +37,7 @@ func Wait(ctx context.Context) error {
 }
 
 func getLocalNodeStatus(ctx context.Context) error {
-	status, err := FromLocalPlanetAgent(ctx)
+	status, err := agent.FromLocalPlanetAgent(ctx)
 	if err != nil {
 		return trace.Wrap(err)
 	}

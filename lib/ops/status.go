@@ -3,6 +3,7 @@ package ops
 import (
 	"github.com/gravitational/gravity/lib/loc"
 	"github.com/gravitational/gravity/lib/modules"
+	"github.com/gravitational/gravity/lib/status/agent"
 	"github.com/gravitational/gravity/lib/storage"
 )
 
@@ -17,15 +18,25 @@ type ClusterStatus struct {
 	// Domain provides the name of the cluster domain
 	Domain string `json:"domain"`
 	// ActiveOperations is a list of operations currently active in the cluster
-	ActiveOperations []SiteOperation `json:"active_operations,omitempty"`
+	ActiveOperations []ClusterOperationState `json:"active_operations,omitempty"`
+	// Operation optionally specifies the cluster operation of interest
+	Operation *ClusterOperationState `json:"operation,omitempty"`
 	// Endpoints contains cluster and application endpoints
 	Endpoints AllEndpoints `json:"endpoints"`
 	// Token specifies the provisioning token used for joining nodes to cluster if any
 	Token storage.ProvisioningToken `json:"token"`
 	// ServerVersion is version of the server the operator is talking to
 	ServerVersion *modules.Version `json:"server_version,omitempty"`
-	// TeleportNodes lists nodes as reported by teleport
-	TeleportNodes Nodes
+	// Agent specifies the result of querying the planet agent
+	Agent *agent.Agent
+}
+
+// ClusterOperationState describes the state of the operation in cluster
+type ClusterOperationState struct {
+	// Operation specifies the operation
+	Operation SiteOperation
+	// Progress specifies the operation progress information
+	Progress ProgressEntry
 }
 
 // AllEndpoints contains information about cluster and application endpoints.

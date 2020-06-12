@@ -570,16 +570,19 @@ type Leader interface {
 type Status interface {
 	// CheckSiteStatus runs app status hook and updates cluster status appropriately
 	CheckSiteStatus(key SiteKey) error
-	// GetLocalClusterStatus returns the status of the cluster
-	GetLocalClusterStatus(ClusterStatusRequest) (*ClusterStatus, error)
+	// GetAndUpdateLocalClusterStatus returns the status of the cluster and updates the cluster record
+	// to reflect the current status
+	GetAndUpdateLocalClusterStatus(context.Context, ClusterStatusRequest) (*ClusterStatus, error)
 	// GetClusterNodes returns a real-time information about cluster nodes
 	GetClusterNodes(SiteKey) ([]Node, error)
 	// GetVersion returns the gravity binary version information.
 	GetVersion(context.Context) (*modules.Version, error)
 }
 
+// ClusterStatusRequest describes the request to get the cluster status
 type ClusterStatusRequest struct {
-	// FIXME
+	// OperationID optionally specifies whether to return
+	// details about the operation given with the ID
 	OperationID string `json:"operation_id,omitempty"`
 }
 

@@ -405,6 +405,16 @@ func (o *OperatorACL) CheckSiteStatus(key SiteKey) error {
 	return o.operator.CheckSiteStatus(key)
 }
 
+// GetAndUpdateLocalClusterStatus queries and returns the cluster status.
+// If the cluster status has degraded, it is reflected in the cluster record
+func (o *OperatorACL) GetAndUpdateLocalClusterStatus(ctx context.Context, req ClusterStatusRequest) (*ClusterStatus, error) {
+	// We're using the update verb as the API potentially modifies cluster state
+	if err := o.Action(storage.KindCluster, teleservices.VerbUpdate); err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return o.operator.GetAndUpdateLocalClusterStatus(ctx, req)
+}
+
 // ValidateServers runs pre-installation checks
 func (o *OperatorACL) ValidateServers(req ValidateServersRequest) error {
 	if err := o.ClusterAction(req.SiteDomain, storage.KindCluster, teleservices.VerbRead); err != nil {
